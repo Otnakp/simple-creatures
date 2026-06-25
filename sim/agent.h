@@ -25,6 +25,21 @@ typedef struct {
     int num_attrs;
 
     int alive;
+
+    int total_layers;
+    int *pre_sizes;
+    int *post_sizes;
+
+    float ***trace_pre;
+    float ***trace_post;
+    Action *trace_actions;
+    int trace_cap;
+    int trace_head;
+    int trace_count;
+
+    float food_eaten;
+    float poison_eaten;
+    int learn_events;
 } Agent;
 
 void agent_init(Agent *a, int x, int y, int vision_radius,
@@ -34,6 +49,8 @@ void agent_read_vision(Agent *a, World *w, float *out);
 void agent_build_input(Agent *a, World *w, float *input);
 Action agent_decide(Agent *a, World *w);
 void agent_move(Agent *a, World *w, Action act);
+void agent_learn(Agent *a, float reward);
+void agent_reset(Agent *a, int x, int y);
 void agent_free(Agent *a);
 
 #endif

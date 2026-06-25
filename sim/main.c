@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>
 
 #define GLFW_INCLUDE_GLCOREARB 1
 #include <GLFW/glfw3.h>
@@ -18,7 +19,7 @@ static const char *VS = "#version 330\n"
     "const vec2 verts[4] = vec2[4](vec2(0,0), vec2(1,0), vec2(1,1), vec2(0,1));"
     "out vec2 uv;"
     "uniform vec2 cell_pos;"
-    "uniform float cell_size;"
+    "uniform vec2 cell_size;"
     "uniform vec2 win_size;"
     "void main(){"
     "  vec2 p = cell_pos + verts[gl_VertexID]*cell_size;"
@@ -51,15 +52,60 @@ static GLuint compile_shader(GLenum type, const char *src)
     return s;
 }
 
-static void draw_cell(int x, int y, float r, float g, float b)
+static void draw_rect(float px, float py, float pw, float ph, float r, float g, float b)
 {
     glUseProgram(prog);
-    glUniform2f(glGetUniformLocation(prog, "cell_pos"), (float)x*CELL_PX, (float)y*CELL_PX);
-    glUniform1f(glGetUniformLocation(prog, "cell_size"), (float)CELL_PX);
+    glUniform2f(glGetUniformLocation(prog, "cell_pos"), px, py);
+    glUniform2f(glGetUniformLocation(prog, "cell_size"), pw, ph);
     glUniform2f(glGetUniformLocation(prog, "win_size"), (float)WIN_W, (float)WIN_H);
     glUniform3f(glGetUniformLocation(prog, "color"), r, g, b);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+static void draw_cell(int x, int y, float r, float g, float b)
+{
+    draw_rect((float)x*CELL_PX, (float)y*CELL_PX, (float)CELL_PX, (float)CELL_PX, r, g, b);
+}
+
+static const char font3x5[10][5][3] = {
+    {{1,1,1},{1,0,1},{1,0,1},{1,0,1},{1,1,1}},
+    {{0,1,0},{1,1,0},{0,1,0},{0,1,0},{1,1,1}},
+    {{1,1,1},{0,0,1},{1,1,1},{1,0,0},{1,1,1}},
+    {{1,1,1},{0,0,1},{1,1,1},{0,0,1},{1,1,1}},
+    {{1,0,1},{1,0,1},{1,1,1},{0,0,1},{0,0,1}},
+    {{1,1,1},{1,0,0},{1,1,1},{0,0,1},{1,1,1}},
+    {{1,1,1},{1,0,0},{1,1,1},{1,0,1},{1,1,1}},
+    {{1,1,1},{0,0,1},{0,0,1},{0,0,1},{0,0,1}},
+    {{1,1,1},{1,0,1},{1,1,1},{1,0,1},{1,1,1}},
+    {{1,1,1},{1,0,1},{1,1,1},{0,0,1},{1,1,1}},
+};
+
+static void draw_number(int cell_x, int cell_y, int num, float r, float g, float b)
+{
+    int pix = 3;
+    int dw = 3 * pix;
+    int dh = 5 * pix;
+    char buf[8];
+    int len = snprintf(buf, sizeof(buf), "%d", num);
+    int total_w = len * dw + (len - 1) * pix;
+    int ox = cell_x * CELL_PX + (CELL_PX - total_w) / 2;
+    int oy = cell_y * CELL_PX + (CELL_PX - dh) / 2;
+
+    for (int d = 0; d < len; d++) {
+        int digit = buf[d] - '0';
+        for (int row = 0; row < 5; row++) {
+            for (int col = 0; col < 3; col++) {
+                if (font3x5[digit][row][col]) {
+                    draw_rect(
+                        (float)(ox + d * (dw + pix) + col * pix),
+                        (float)(oy + row * pix),
+                        (float)pix, (float)pix, r, g, b
+                    );
+                }
+            }
+        }
+    }
 }
 
 static void key_callback(GLFWwindow *win, int key, int scancode, int action, int mods)
@@ -67,6 +113,25 @@ static void key_callback(GLFWwindow *win, int key, int scancode, int action, int
     (void)scancode; (void)mods;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(win, GLFW_TRUE);
+}
+
+#define MUTATION_RATE 0.1f
+#define MUTATION_MAG 0.2f
+
+static void mutate(Agent *dst, Agent *src)
+{
+    for (int l = 0; l < src->total_layers; l++) {
+        int postSize = src->post_sizes[l];
+        int preSize = src->pre_sizes[l];
+        for (int j = 0; j < postSize; j++) {
+            for (int i = 0; i < preSize; i++) {
+                float w = src->brain.weights[l][j][i];
+                if ((float)rand() / RAND_MAX < MUTATION_RATE)
+                    w += (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * MUTATION_MAG;
+                dst->brain.weights[l][j][i] = w;
+            }
+        }
+    }
 }
 
 int main(void)
@@ -77,14 +142,21 @@ int main(void)
     WIN_W = width * CELL_PX;
     WIN_H = height * CELL_PX;
 
+    int num_agents = 15;
+    int max_generations = 20;
+
     World world;
     world_init(&world, width, height);
-    world_populate(&world, 40, 20);
+    world_populate(&world, 20, 30);
 
     char *attr_names[] = { "Vita", "Fame" };
     int neurons[] = { 16 };
-    Agent agent;
-    agent_init(&agent, width / 2, height / 2, 2, 1, neurons, 2, attr_names);
+    Agent agents[15];
+    for (int i = 0; i < num_agents; i++) {
+        int ax = 2 + rand() % (width - 4);
+        int ay = 2 + rand() % (height - 4);
+        agent_init(&agents[i], ax, ay, 2, 1, neurons, 2, attr_names);
+    }
 
     if (!glfwInit()) return 1;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -111,39 +183,94 @@ int main(void)
     glGenBuffers(1, &vbo);
     (void)vbo;
 
-    int steps = 0;
-    while (!glfwWindowShouldClose(win) && agent.alive && steps < 2000) {
-        glViewport(0, 0, WIN_W, WIN_H);
-        glClear(GL_COLOR_BUFFER_BIT);
+    int gen = 0;
+    while (!glfwWindowShouldClose(win) && gen < max_generations) {
+        int steps = 0;
+        int alive_count = num_agents;
 
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (x == agent.x && y == agent.y) continue;
-                CellType c = world_get(&world, x, y);
-                if (c == CELL_FOOD)          draw_cell(x, y, 0.2f, 0.9f, 0.2f);
-                else if (c == CELL_POISON)   draw_cell(x, y, 0.9f, 0.2f, 0.2f);
-                else                          draw_cell(x, y, 0.1f, 0.1f, 0.12f);
+        while (!glfwWindowShouldClose(win) && alive_count > 0 && steps < 2000) {
+            glViewport(0, 0, WIN_W, WIN_H);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    CellType c = world_get(&world, x, y);
+                    if (c == CELL_FOOD)          draw_cell(x, y, 0.2f, 0.9f, 0.2f);
+                    else if (c == CELL_POISON)   draw_cell(x, y, 0.6f, 0.1f, 0.8f);
+                    else                          draw_cell(x, y, 0.1f, 0.1f, 0.12f);
+                }
+            }
+
+            alive_count = 0;
+            for (int i = 0; i < num_agents; i++) {
+                if (!agents[i].alive) continue;
+                alive_count++;
+                draw_cell(agents[i].x, agents[i].y, 1.0f, 0.85f, 0.0f);
+                draw_number(agents[i].x, agents[i].y, i + 1, 0.0f, 0.0f, 0.0f);
+            }
+
+            char title[128];
+            snprintf(title, sizeof(title), "Gen %d | Step %d | Alive %d/%d",
+                     gen, steps, alive_count, num_agents);
+            glfwSetWindowTitle(win, title);
+
+            for (int i = 0; i < num_agents; i++) {
+                if (!agents[i].alive) continue;
+                Action act = agent_decide(&agents[i], &world);
+                agent_move(&agents[i], &world, act);
+            }
+            steps++;
+
+            glfwSwapBuffers(win);
+            glfwPollEvents();
+        }
+
+        printf("=== Gen %d ended: step %d, alive=%d/%d ===\n", gen, steps, alive_count, num_agents);
+        for (int i = 0; i < num_agents; i++) {
+            printf("Agent %2d: food=%.0f poison=%.0f score=%g learn=%d\n",
+                   i, agents[i].food_eaten, agents[i].poison_eaten,
+                   agents[i].food_eaten - agents[i].poison_eaten,
+                   agents[i].learn_events);
+        }
+
+        int rank[15];
+        for (int i = 0; i < num_agents; i++) rank[i] = i;
+        for (int i = 0; i < num_agents - 1; i++) {
+            for (int j = i + 1; j < num_agents; j++) {
+                float si = agents[rank[i]].food_eaten - agents[rank[i]].poison_eaten;
+                float sj = agents[rank[j]].food_eaten - agents[rank[j]].poison_eaten;
+                if (sj > si) {
+                    int tmp = rank[i]; rank[i] = rank[j]; rank[j] = tmp;
+                }
             }
         }
 
-        draw_cell(agent.x, agent.y, 1.0f, 0.85f, 0.0f);
+        int keep = num_agents / 2;
+        for (int k = 0; k < keep; k++) {
+            Agent *src = &agents[rank[k]];
+            int ax = 2 + rand() % (width - 4);
+            int ay = 2 + rand() % (height - 4);
+            agent_reset(src, ax, ay);
+        }
+        for (int k = keep; k < num_agents; k++) {
+            Agent *src = &agents[rank[k % keep]];
+            Agent *dst = &agents[rank[k]];
+            mutate(dst, src);
+            int ax = 2 + rand() % (width - 4);
+            int ay = 2 + rand() % (height - 4);
+            agent_reset(dst, ax, ay);
+        }
 
-        char title[128];
-        snprintf(title, sizeof(title), "Step %d | Vita=%.0f Fame=%.0f",
-                 steps, agent.attr_values[0], agent.attr_values[1]);
-        glfwSetWindowTitle(win, title);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                world_set(&world, x, y, CELL_EMPTY);
+        world_populate(&world, 20, 30);
 
-        Action act = agent_decide(&agent, &world);
-        agent_move(&agent, &world, act);
-        steps++;
-
-        glfwSwapBuffers(win);
-        glfwPollEvents();
+        gen++;
     }
 
-    printf("Simulation ended at step %d, alive=%d\n", steps, agent.alive);
-
-    agent_free(&agent);
+    for (int i = 0; i < num_agents; i++)
+        agent_free(&agents[i]);
     world_free(&world);
     glfwDestroyWindow(win);
     glfwTerminate();

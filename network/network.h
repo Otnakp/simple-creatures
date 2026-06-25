@@ -25,11 +25,15 @@ typedef struct
     Activation actOutput;
 
     float ***weights;
+
+    float **pre_act;
+    float **post_act;
+    int acts_allocated;
 } Network;
 
 void network_init(Network *net);
 void network_load_weights(Network *net, const char *filename);
 void network_free(Network *net);
-float *feedforward(const Network *net, const float *input);
+float *feedforward(Network *net, const float *input);
 
 #endif // NETWORK_H

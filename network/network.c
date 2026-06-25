@@ -14,6 +14,7 @@ void network_init(Network *net)
 {
     int totalLayers = net->numLayers + 1;
     net->weights = malloc(totalLayers * sizeof(float **));
+    net->acts_allocated = 0;
 
     int prevSize = net->inputs;
 
@@ -81,34 +82,57 @@ static float *vec_mat_mul(float *v, int h, float **m, int w, Activation act)
     return r;
 }
 
-float *feedforward(const Network *net, const float *input)
+float *feedforward(Network *net, const float *input)
 {
     int totalLayers = net->numLayers + 1;
+
+    if (!net->acts_allocated) {
+        net->pre_act = malloc(totalLayers * sizeof(float *));
+        net->post_act = malloc(totalLayers * sizeof(float *));
+        int prev = net->inputs;
+        for (int l = 0; l < totalLayers; l++) {
+            int layerSize = (l < net->numLayers) ? net->neuronsPerLayer[l] : net->outputs;
+            net->pre_act[l] = malloc(sizeof(float) * (prev + 1));
+            net->post_act[l] = malloc(sizeof(float) * layerSize);
+            prev = layerSize;
+        }
+        net->acts_allocated = 1;
+    }
+
     int prevSize = net->inputs;
-    float *cur = malloc(sizeof(float) * (prevSize + 1));
     for (int i = 0; i < prevSize; i++)
-        cur[i] = input[i];
-    cur[prevSize] = 1.0f;
+        net->pre_act[0][i] = input[i];
+    net->pre_act[0][prevSize] = 1.0f;
+
+    float *cur = net->pre_act[0];
 
     for (int l = 0; l < totalLayers; l++) {
         int layerSize = (l < net->numLayers) ? net->neuronsPerLayer[l] : net->outputs;
         Activation act = (l == 0) ? net->actInput
                        : (l == net->numLayers) ? net->actOutput
                        : net->actHidden;
-        float *next = vec_mat_mul(cur, prevSize, net->weights[l], layerSize, act);
-        free(cur);
-        if (l == totalLayers - 1) {
-            cur = next;
-        } else {
-            cur = malloc(sizeof(float) * (layerSize + 1));
+        for (int i = 0; i < layerSize; i++) {
+            float x = net->weights[l][i][prevSize];
+            for (int j = 0; j < prevSize; j++)
+                x += cur[j] * net->weights[l][i][j];
+            net->post_act[l][i] = (act == ACT_SOFTMAX) ? x : activate(x, act);
+        }
+        if (act == ACT_SOFTMAX)
+            apply_softmax(net->post_act[l], layerSize);
+
+        if (l < totalLayers - 1) {
             for (int i = 0; i < layerSize; i++)
-                cur[i] = next[i];
-            cur[layerSize] = 1.0f;
-            free(next);
+                net->pre_act[l+1][i] = net->post_act[l][i];
+            net->pre_act[l+1][layerSize] = 1.0f;
+            cur = net->pre_act[l+1];
         }
         prevSize = layerSize;
     }
-    return cur;
+
+    float *out = malloc(sizeof(float) * net->outputs);
+    for (int i = 0; i < net->outputs; i++)
+        out[i] = net->post_act[totalLayers-1][i];
+    return out;
 }
 
 void network_load_weights(Network *net, const char *filename)
@@ -118,6 +142,7 @@ void network_load_weights(Network *net, const char *filename)
 
     int totalLayers = net->numLayers + 1;
     net->weights = malloc(totalLayers * sizeof(float **));
+    net->acts_allocated = 0;
 
     int prevSize = net->inputs;
     for (int l = 0; l < totalLayers; l++) {
@@ -142,6 +167,14 @@ void network_free(Network *net)
         for (int n = 0; n < layerSize; n++)
             free(net->weights[l][n]);
         free(net->weights[l]);
+        if (net->acts_allocated) {
+            free(net->pre_act[l]);
+            free(net->post_act[l]);
+        }
     }
     free(net->weights);
+    if (net->acts_allocated) {
+        free(net->pre_act);
+        free(net->post_act);
+    }
 }

@@ -1,0 +1,11 @@
+# Binary
+sim/sim
+sim/headless
+network/test_network
+
+# Python
+python/__pycache__/
+python/weights.txt
+
+# Build artifacts
+*.o
