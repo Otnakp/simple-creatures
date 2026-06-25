@@ -1,7 +1,7 @@
 # Simple Creatures
 
-Sistema di creature artificiali con reti neurali evolute via RPA (Reinforcement by Pathway Activation) e selezione genetica.
+Artificial creatures system with neural networks evolved via RPA (Reinforcement by Pathway Activation) and genetic selection.
 
-Reti neurali feed-forward scritte in C puro, agenti con sensori (visione 5×5) e attributi dinamici (vita/fame), ambienti griglia con cibo e veleno.
+Feed-forward neural nets written in pure C, agents with sensors (5×5 vision) and dynamic attributes (health/hunger), grid environments with food and poison.
 
-Simulazione grafica via OpenGL+GLFW, modalità headless per training veloce di migliaia di generazioni.
+OpenGL+GLFW graphical simulation, headless mode for fast training over thousands of generations.
